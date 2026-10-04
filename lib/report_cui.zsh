@@ -76,7 +76,6 @@ yojitsu::report_cui::render_table() {
 
   local count=0
   local total_elapsed=0.0
-  local total_cost=0.0
   local delim=$'\x1f'
 
   local title agent model effort elapsed_sec tot_tokens cmd_tok base_tok th_tok resp_tok cmd_count cost_val
@@ -98,9 +97,6 @@ yojitsu::report_cui::render_table() {
     if [[ "${elapsed_sec}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
       total_elapsed="$(awk -v t1="${total_elapsed}" -v t2="${elapsed_sec}" 'BEGIN { printf "%.2f", t1 + t2 }')"
     fi
-    if [[ "${cost_val}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-      total_cost="$(awk -v c1="${total_cost}" -v c2="${cost_val}" 'BEGIN { printf "%.4f", c1 + c2 }')"
-    fi
 
     printf "%-26s | %-7s | %-16s | %-6s | %-7s | %-8s | %-16s | %-16s | %s\n" \
       "${title}" \
@@ -115,7 +111,7 @@ yojitsu::report_cui::render_table() {
   done <<< "${row_data}"
 
   print -r -- "${YOJITSU_COLORS[gray]}${dash_line}${YOJITSU_COLORS[reset]}"
-  print -r -- "${YOJITSU_COLORS[dim]}Total Runs: ${count} | Total Elapsed: ${total_elapsed}s | Estimated Cost: \$${total_cost}${YOJITSU_COLORS[reset]}"
+  print -r -- "${YOJITSU_COLORS[dim]}Total Runs: ${count} | Total Elapsed: ${total_elapsed}s${YOJITSU_COLORS[reset]}"
   print -r -- "${YOJITSU_COLORS[cyan]}${sep_line}${YOJITSU_COLORS[reset]}"
   print ""
 }
