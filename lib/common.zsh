@@ -106,7 +106,7 @@ yojitsu::common::resolve_next_output_dir() {
   local num
 
   if [[ -d "${parent_abs}" ]]; then
-    for dir_entry in "${parent_abs}/${clean_name}"_*; do
+    for dir_entry in "${parent_abs}/${clean_name}"_*(N); do
       if [[ -d "${dir_entry}" ]]; then
         num="${dir_entry##*_}"
         if [[ "${num}" =~ ^[0-9]+$ ]]; then

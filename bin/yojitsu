@@ -1,0 +1,292 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+# bin/yojitsu - Main CLI entrypoint for yojitsu.zsh
+
+# Resolve directory of this script and project root
+typeset -g _YOJITSU_BIN_DIR="${${(%):-%x}:A:h}"
+typeset -g _YOJITSU_ROOT_DIR="${_YOJITSU_BIN_DIR:h}"
+
+# Source libraries
+source "${_YOJITSU_ROOT_DIR}/lib/common.zsh"
+source "${_YOJITSU_ROOT_DIR}/lib/report_cui.zsh"
+source "${_YOJITSU_ROOT_DIR}/lib/report_html.zsh"
+
+yojitsu::cli::show_help() {
+  cat << 'EOF'
+yojitsu.zsh - LLM Cost-Performance & Token Benchmark Analyzer
+
+Usage:
+  yojitsu run [options]
+  yojitsu run --agent agy --prompt "Find where callbacks are defined"
+  yojitsu run --prompts-json prompts.json
+
+Commands:
+  run                   Execute benchmark runs, print CUI summary, and generate HTML report
+  help, -h, --help      Show this help message
+
+Options for 'run':
+  -a, --agent <name>    Agent to benchmark (agy, claude, copilot) [default: agy]
+  -p, --prompt <text>   Single prompt text to execute
+  --prompt-title <text> Title for the single prompt [default: "Prompt 1"]
+  --prompts-json <path> Path to JSON file containing prompt list
+  -m, --model <name>    Override model name
+  -e, --effort <level>  Reasoning effort (low, medium, high, xhigh, max)
+  -o, --output-dir <dir>Base output directory for reports [default: ./benchmark_results]
+  --title <text>        Dashboard report title
+  --dry-run             Simulate execution using sample logs without invoking actual agent
+EOF
+}
+
+# --- Execution Helpers ---
+__yojitsu::cli::execute_agy() {
+  local prompt_text="$1"
+  local model_opt="$2"
+  local effort_opt="$3"
+  local dry_run="$4"
+
+  if [[ "${dry_run}" == "true" ]]; then
+    # In dry-run mode, look for agy-sample.json or generate a mock
+    if [[ -f "${_YOJITSU_ROOT_DIR}/agy-sample.json" ]]; then
+      cat "${_YOJITSU_ROOT_DIR}/agy-sample.json"
+      return 0
+    else
+      # Minimal mock stream json
+      cat << EOF
+{"event":"init","conversation_id":"mock-conv-id","init":{"cwd":"$PWD","tools":["run_command"]}}
+{"event":"step_update","step_update":{"conversation_id":"mock-conv-id","step_index":1,"state":"DONE","duration_seconds":3.2,"usage":{"input_tokens":500,"output_tokens":250,"thinking_tokens":100,"cache_read_tokens":0,"total_tokens":750}}}
+{"event":"result","result":{"conversation_id":"mock-conv-id","status":"SUCCESS","response":"Mock response for: ${prompt_text}","duration_seconds":3.2,"usage":{"input_tokens":500,"output_tokens":250,"thinking_tokens":100,"cache_read_tokens":0,"total_tokens":750}}}
+EOF
+      return 0
+    fi
+  fi
+
+  local agy_bin
+  agy_bin="$(command -v agy || true)"
+  if [[ -z "${agy_bin}" ]]; then
+    for cand in /opt/homebrew/bin/agy "${HOME}/.local/bin/agy" /usr/local/bin/agy; do
+      if [[ -x "${cand}" ]]; then
+        agy_bin="${cand}"
+        break
+      fi
+    done
+  fi
+
+  if [[ -z "${agy_bin}" ]]; then
+    yojitsu::common::die "agy executable not found in PATH or standard locations."
+  fi
+
+  local -a cmd_args
+  cmd_args=("${agy_bin}" "-p" "${prompt_text}" "--output-format" "stream-json")
+  if [[ -n "${effort_opt}" ]]; then
+    cmd_args+=("--effort" "${effort_opt}")
+  fi
+  if [[ -n "${model_opt}" ]]; then
+    cmd_args+=("--model" "${model_opt}")
+  fi
+
+  local raw_output
+  raw_output="$("${cmd_args[@]}" 2>/dev/null)" || true
+
+  # Fallback to json if stream-json returned empty or failed
+  if [[ -z "${raw_output//[[:space:]]/}" ]]; then
+    local -a fb_args
+    fb_args=("${agy_bin}" "-p" "${prompt_text}" "--output-format" "json")
+    if [[ -n "${effort_opt}" ]]; then fb_args+=("--effort" "${effort_opt}"); fi
+    if [[ -n "${model_opt}" ]]; then fb_args+=("--model" "${model_opt}"); fi
+    raw_output="$("${fb_args[@]}" 2>/dev/null)" || true
+  fi
+
+  print -r -- "${raw_output}"
+}
+
+# --- Main Run Command Handler ---
+yojitsu::cli::cmd_run() {
+  local agent="agy"
+  local prompt_text=""
+  local prompt_title=""
+  local prompts_json=""
+  local model_opt=""
+  local effort_opt=""
+  local output_dir_base="./benchmark_results"
+  local dashboard_title="yojitsu Benchmark Dashboard"
+  local dry_run="false"
+
+  while (( $# > 0 )); do
+    case "$1" in
+      -a|--agent|--tool)
+        agent="$2"
+        shift 2
+        ;;
+      -p|--prompt)
+        prompt_text="$2"
+        shift 2
+        ;;
+      --prompt-title)
+        prompt_title="$2"
+        shift 2
+        ;;
+      --prompts-json)
+        prompts_json="$2"
+        shift 2
+        ;;
+      -m|--model)
+        model_opt="$2"
+        shift 2
+        ;;
+      -e|--effort)
+        effort_opt="$2"
+        shift 2
+        ;;
+      -o|--output-dir)
+        output_dir_base="$2"
+        shift 2
+        ;;
+      --title)
+        dashboard_title="$2"
+        shift 2
+        ;;
+      --dry-run)
+        dry_run="true"
+        shift
+        ;;
+      -h|--help)
+        yojitsu::cli::show_help
+        exit 0
+        ;;
+      *)
+        yojitsu::common::die "Unknown option: $1"
+        ;;
+    esac
+  done
+
+  yojitsu::common::check_dependencies
+
+  local normalizer_jq="${_YOJITSU_ROOT_DIR}/lib/normalize/${agent}.jq"
+  if [[ ! -f "${normalizer_jq}" ]]; then
+    yojitsu::common::die "Normalizer not found for agent '${agent}': ${normalizer_jq}"
+  fi
+
+  # Build list of benchmark prompts
+  typeset -a prompt_items
+  if [[ -n "${prompts_json}" ]]; then
+    if [[ ! -f "${prompts_json}" ]]; then
+      yojitsu::common::die "Prompts JSON file not found: ${prompts_json}"
+    fi
+
+    # Read items from prompts_json (supports array of strings or array of objects)
+    local count
+    count="$(jq 'length' "${prompts_json}")"
+    for (( i = 0; i < count; i++ )); do
+      local item_json
+      item_json="$(jq -c ".[$i]" "${prompts_json}")"
+      prompt_items+=("${item_json}")
+    done
+  elif [[ -n "${prompt_text}" ]]; then
+    local single_item
+    single_item="$(jq -n -c \
+      --arg id "P1" \
+      --arg title "${prompt_title:-Prompt 1}" \
+      --arg prompt "${prompt_text}" \
+      --arg model "${model_opt}" \
+      --arg effort "${effort_opt}" \
+      '{id: $id, title: $title, prompt: $prompt, model: (if $model != "" then $model else null end), effort: (if $effort != "" then $effort else null end)}'
+    )"
+    prompt_items+=("${single_item}")
+  else
+    yojitsu::common::die "No prompt specified. Provide either --prompt \"...\" or --prompts-json <file>"
+  fi
+
+  local total_prompts=${#prompt_items[@]}
+  local target_dir="$PWD"
+  local out_dir
+  out_dir="$(yojitsu::common::resolve_next_output_dir "${output_dir_base}")"
+  yojitsu::common::ensure_dir "${out_dir}"
+
+  print -r -- "${YOJITSU_COLORS[cyan]}============================================================${YOJITSU_COLORS[reset]}"
+  print -r -- "${YOJITSU_COLORS[bold]}${dashboard_title}${YOJITSU_COLORS[reset]}"
+  print -r -- "  Target Workspace : ${target_dir}"
+  print -r -- "  Target Agent     : ${agent}"
+  print -r -- "  Prompts to run   : ${total_prompts}"
+  print -r -- "  Output Directory : ${out_dir}"
+  if [[ "${dry_run}" == "true" ]]; then
+    print -r -- "  Execution Mode   : DRY RUN (Mock / Fixture data)"
+  fi
+  print -r -- "${YOJITSU_COLORS[cyan]}============================================================${YOJITSU_COLORS[reset]}"
+
+  local -a common_json_runs
+  local idx=0
+
+  for item in "${prompt_items[@]}"; do
+    (( idx++ )) || true
+    local p_id p_title p_text p_model p_effort
+    p_id="$(print -r -- "${item}" | jq -r 'if type == "string" then "P'${idx}'" else (.id // "P'${idx}'") end')"
+    p_title="$(print -r -- "${item}" | jq -r 'if type == "string" then "Prompt '${idx}'" else (.title // "Prompt '${idx}'") end')"
+    p_text="$(print -r -- "${item}" | jq -r 'if type == "string" then . else (.prompt // "") end')"
+    p_model="$(print -r -- "${item}" | jq -r 'if type == "object" and .model then .model else "'"${model_opt}"'" end')"
+    p_effort="$(print -r -- "${item}" | jq -r 'if type == "object" and .effort then .effort else "'"${effort_opt}"'" end')"
+
+    yojitsu::common::log_info "Executing [${idx}/${total_prompts}] [${p_id}] ${p_title}..."
+
+    local raw_log=""
+    if [[ "${agent}" == "agy" ]]; then
+      raw_log="$(__yojitsu::cli::execute_agy "${p_text}" "${p_model}" "${p_effort}" "${dry_run}")"
+    else
+      yojitsu::common::die "Execution for agent '${agent}' is not yet supported in this version."
+    fi
+
+    # Normalize output to Common Benchmark JSON
+    local run_json
+    run_json="$(
+      print -r -- "${raw_log}" | jq -n -f "${normalizer_jq}" \
+        --arg prompt "${p_text}" \
+        --arg id "${p_id}" \
+        --arg title "${p_title}" \
+        --arg model "${p_model}" \
+        --arg effort "${p_effort}" \
+        --arg target_repo "${target_dir}" \
+        --arg timestamp "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    )"
+
+    common_json_runs+=("${run_json}")
+  done
+
+  # Combine all runs into a single JSON array
+  local all_runs_json
+  all_runs_json="$(
+    printf '%s\n' "${common_json_runs[@]}" | jq -s '.'
+  )"
+
+  # 1. Output CUI table report
+  yojitsu::report_cui::render_table "${all_runs_json}"
+
+  # 2. Output HTML report
+  yojitsu::report_html::generate "${all_runs_json}" "${out_dir}" "${dashboard_title}" "${target_dir}"
+
+  print -r -- "${YOJITSU_COLORS[green]}[Done]${YOJITSU_COLORS[reset]} Benchmark complete. Outputs saved to: ${out_dir}"
+}
+
+# --- Entrypoint Dispatcher ---
+main() {
+  if (( $# == 0 )); then
+    yojitsu::cli::show_help
+    exit 0
+  fi
+
+  local subcommand="$1"
+  shift
+
+  case "${subcommand}" in
+    run)
+      yojitsu::cli::cmd_run "$@"
+      ;;
+    help|-h|--help)
+      yojitsu::cli::show_help
+      ;;
+    *)
+      yojitsu::common::die "Unknown command: ${subcommand}. Run 'yojitsu --help' for usage."
+      ;;
+  esac
+}
+
+main "$@"

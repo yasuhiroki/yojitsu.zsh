@@ -20,10 +20,13 @@ yojitsu::report_html::generate() {
 
   local json_content
   if [[ -n "${json_input}" && "${json_input}" != "-" ]]; then
-    if [[ ! -f "${json_input}" ]]; then
+    if [[ "${json_input}" =~ ^[[:space:]]*[\[\{] ]]; then
+      json_content="${json_input}"
+    elif [[ -f "${json_input}" ]]; then
+      json_content="$(<"${json_input}")"
+    else
       yojitsu::common::die "HTML report input file not found: ${json_input}"
     fi
-    json_content="$(<"${json_input}")"
   else
     json_content="$(cat)"
   fi

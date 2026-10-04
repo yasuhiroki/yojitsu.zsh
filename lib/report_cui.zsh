@@ -9,21 +9,18 @@ if (( ! $+functions[yojitsu::common::log_info] )); then
   source "${script_dir}/common.zsh"
 fi
 
-__yojitsu::report_cui::format_cell() {
-  local str="$1"
-  local width="$2"
-  printf "%-${width}s" "${str[1,$width]}"
-}
-
 yojitsu::report_cui::render_table() {
   local json_input="${1:-}"
   local json_content
 
   if [[ -n "${json_input}" && "${json_input}" != "-" ]]; then
-    if [[ ! -f "${json_input}" ]]; then
+    if [[ "${json_input}" =~ ^[[:space:]]*[\[\{] ]]; then
+      json_content="${json_input}"
+    elif [[ -f "${json_input}" ]]; then
+      json_content="$(<"${json_input}")"
+    else
       yojitsu::common::die "Report input file not found: ${json_input}"
     fi
-    json_content="$(<"${json_input}")"
   else
     json_content="$(cat)"
   fi
@@ -32,45 +29,31 @@ yojitsu::report_cui::render_table() {
     yojitsu::common::die "No JSON content provided to CUI report generator"
   fi
 
-  # Extract TSV row data using jq
-  local tsv_data
-  tsv_data="$(
+  # Extract delimited row data using jq with \u001f (Unit Separator)
+  local row_data
+  row_data="$(
     print -r -- "${json_content}" | jq -r '
       (if type == "array" then . else [.] end)
       | .[]
       | [
-          ((.benchmark.title // .benchmark.id // "Untitled") | gsub("\t|\n"; " ")),
-          ((.metadata.agent // "unknown") | gsub("\t|\n"; " ")),
-          ((.benchmark.model // "default") | gsub("\t|\n"; " ")),
-          ((.benchmark.effort // "default") | gsub("\t|\n"; " ")),
-          (
-            if .benchmark.elapsed_sec then
-              (.benchmark.elapsed_sec | tostring) + "s"
-            else
-              "0.0s"
-            end
-          ),
+          ((.benchmark.title // .benchmark.id // "Untitled") | tostring | gsub("[\r\n\u001f]"; " ")),
+          ((.metadata.agent // "unknown") | tostring | gsub("[\r\n\u001f]"; " ")),
+          ((if (.benchmark.model // "") != "" then .benchmark.model else "default" end) | tostring),
+          ((if (.benchmark.effort // "") != "" then .benchmark.effort else "default" end) | tostring),
+          ((.benchmark.elapsed_sec // 0.0) | tostring),
           ((.tokens.total_tokens // 0) | tostring),
-          (
-            ((.tokens.breakdown.cmd_tokens // 0) | tostring)
-            + " / "
-            + ((.tokens.breakdown.base_context_tokens // 0) | tostring)
-          ),
-          (
-            ((.tokens.breakdown.thought_tokens // 0) | tostring)
-            + " / "
-            + ((.tokens.breakdown.response_tokens // 0) | tostring)
-          ),
-          (
-            ((.tool_calls_count // (.tools | length) // 0) | tostring) + " cmds"
-          ),
+          ((.tokens.breakdown.cmd_tokens // 0) | tostring),
+          ((.tokens.breakdown.base_context_tokens // 0) | tostring),
+          ((.tokens.breakdown.thought_tokens // 0) | tostring),
+          ((.tokens.breakdown.response_tokens // 0) | tostring),
+          ((.tool_calls_count // (.tools | length) // 0) | tostring),
           ((.cost.estimated_cost_usd // 0.0) | tostring)
         ]
-      | @tsv
+      | join("\u001f")
     '
   )"
 
-  if [[ -z "${tsv_data//[[:space:]]/}" ]]; then
+  if [[ -z "${row_data//[[:space:]]/}" ]]; then
     yojitsu::common::log_warn "No valid benchmark runs found in JSON."
     return 0
   fi
@@ -94,34 +77,30 @@ yojitsu::report_cui::render_table() {
   local count=0
   local total_elapsed=0.0
   local total_cost=0.0
+  local delim=$'\x1f'
 
-  local title agent model effort time_str tot_str in_desc out_desc cmds_desc cost_val
-  while IFS=$'\t' read -r title agent model effort time_str tot_str in_desc out_desc cmds_desc cost_val; do
+  local title agent model effort elapsed_sec tot_tokens cmd_tok base_tok th_tok resp_tok cmd_count cost_val
+  while IFS="${delim}" read -r title agent model effort elapsed_sec tot_tokens cmd_tok base_tok th_tok resp_tok cmd_count cost_val; do
+    [[ -z "${title}" && -z "${tot_tokens}" ]] && continue
     (( count++ )) || true
 
-    local tot_formatted
-    tot_formatted="$(yojitsu::common::format_number "${tot_str}")"
+    local tot_formatted="$(yojitsu::common::format_number "${tot_tokens}")"
+    local in_formatted="$(yojitsu::common::format_number "${cmd_tok}") / $(yojitsu::common::format_number "${base_tok}")"
+    local out_formatted="$(yojitsu::common::format_number "${th_tok}") / $(yojitsu::common::format_number "${resp_tok}")"
+    local time_str="${elapsed_sec}s"
+    local cmds_desc="${cmd_count} cmds"
 
     # Truncate title if too long
     if (( ${#title} > 26 )); then
       title="${title[1,23]}..."
     fi
 
-    local raw_time="${time_str%s}"
-    if [[ "${raw_time}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-      total_elapsed="$(awk -v t1="${total_elapsed}" -v t2="${raw_time}" 'BEGIN { printf "%.2f", t1 + t2 }')"
+    if [[ "${elapsed_sec}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+      total_elapsed="$(awk -v t1="${total_elapsed}" -v t2="${elapsed_sec}" 'BEGIN { printf "%.2f", t1 + t2 }')"
     fi
     if [[ "${cost_val}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
       total_cost="$(awk -v c1="${total_cost}" -v c2="${cost_val}" 'BEGIN { printf "%.4f", c1 + c2 }')"
     fi
-
-    local cmd_val="${in_desc% / *}"
-    local base_val="${in_desc#* / }"
-    local th_val="${out_desc% / *}"
-    local resp_val="${out_desc#* / }"
-
-    local in_formatted="$(yojitsu::common::format_number "${cmd_val}") / $(yojitsu::common::format_number "${base_val}")"
-    local out_formatted="$(yojitsu::common::format_number "${th_val}") / $(yojitsu::common::format_number "${resp_val}")"
 
     printf "%-26s | %-7s | %-16s | %-6s | %-7s | %-8s | %-16s | %-16s | %s\n" \
       "${title}" \
@@ -133,7 +112,7 @@ yojitsu::report_cui::render_table() {
       "${in_formatted}" \
       "${out_formatted}" \
       "${cmds_desc}"
-  done <<< "${tsv_data}"
+  done <<< "${row_data}"
 
   print -r -- "${YOJITSU_COLORS[gray]}${dash_line}${YOJITSU_COLORS[reset]}"
   print -r -- "${YOJITSU_COLORS[dim]}Total Runs: ${count} | Total Elapsed: ${total_elapsed}s | Estimated Cost: \$${total_cost}${YOJITSU_COLORS[reset]}"
