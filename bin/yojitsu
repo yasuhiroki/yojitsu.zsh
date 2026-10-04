@@ -32,7 +32,7 @@ Options for 'run':
   --prompts-json <path> Path to JSON file containing prompt list
   -m, --model <name>    Override model name
   -e, --effort <level>  Reasoning effort (low, medium, high, xhigh, max)
-  -o, --output-dir <dir>Base output directory for reports [default: ./benchmark_results]
+  -o, --output-dir <dir>Base output directory for reports [default: ./reports]
   --title <text>        Dashboard report title
   --dry-run             Simulate execution using sample logs without invoking actual agent
 EOF
@@ -108,7 +108,7 @@ yojitsu::cli::cmd_run() {
   local prompts_json=""
   local model_opt=""
   local effort_opt=""
-  local output_dir_base="./benchmark_results"
+  local output_dir_base="./reports"
   local dashboard_title="yojitsu Benchmark Dashboard"
   local dry_run="false"
 

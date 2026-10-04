@@ -89,38 +89,36 @@ yojitsu::common::ensure_dir() {
   fi
 }
 
-# Resolve sequential output directory (e.g., ./benchmark_results_01)
+# Resolve sequential output directory under base_dir (e.g., reports/20261005_010203_001)
 yojitsu::common::resolve_next_output_dir() {
-  local base_path="$1"
-  local parent_dir
-  local base_name
-  parent_dir="$(dirname "${base_path}")"
-  base_name="$(basename "${base_path}")"
-
+  local base_dir="${1:-./reports}"
   local parent_abs
-  parent_abs="$(cd "${parent_dir}" 2>/dev/null && pwd || pwd)"
-  
-  local clean_name="${base_name%_[0-9]*}"
+  if [[ ! -d "${base_dir}" ]]; then
+    mkdir -p "${base_dir}"
+  fi
+  parent_abs="$(cd "${base_dir}" && pwd)"
+
+  local timestamp
+  timestamp="$(date '+%Y%m%d_%H%M%S')"
+
   local existing_max=0
   local dir_entry
   local num
 
-  if [[ -d "${parent_abs}" ]]; then
-    for dir_entry in "${parent_abs}/${clean_name}"_*(N); do
-      if [[ -d "${dir_entry}" ]]; then
-        num="${dir_entry##*_}"
-        if [[ "${num}" =~ ^[0-9]+$ ]]; then
-          if (( 10#${num} > existing_max )); then
-            existing_max=$(( 10#${num} ))
-          fi
+  for dir_entry in "${parent_abs}/${timestamp}"_*(N); do
+    if [[ -d "${dir_entry}" ]]; then
+      num="${dir_entry##*_}"
+      if [[ "${num}" =~ ^[0-9]+$ ]]; then
+        if (( 10#${num} > existing_max )); then
+          existing_max=$(( 10#${num} ))
         fi
       fi
-    done
-  fi
+    fi
+  done
 
   local next_num=$(( existing_max + 1 ))
   local next_dir
-  printf -v next_dir "%s/%s_%02d" "${parent_abs}" "${clean_name}" "${next_num}"
+  printf -v next_dir "%s/%s_%03d" "${parent_abs}" "${timestamp}" "${next_num}"
   print -r -- "${next_dir}"
 }
 
