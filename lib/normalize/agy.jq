@@ -5,17 +5,15 @@
 [inputs] as $events
 | ($events | map(select(. != null))) as $valid_events
 
-# Extract init event
+# Extract init event and result event
 | ($valid_events | map(select(.event == "init")) | last) as $init_event
 | ($valid_events | map(select(.event == "result")) | last) as $result_event
-| ($valid_events | map(select(.event == "step_update" and .step_update.state == "DONE" and .step_update.usage != null)) | last) as $last_step_done
 
 # Extract conversation id
 | (
     ($result_event.result.conversation_id // empty)
-    // ($last_step_done.step_update.conversation_id // empty)
     // ($init_event.conversation_id // empty)
-    // ($valid_events | map(.conversation_id // empty) | first)
+    // ($valid_events | map(.conversation_id // .step_update.conversation_id // empty) | first)
     // ""
   ) as $conv_id
 
@@ -26,11 +24,16 @@
     // ($ARGS.named.target_repo // "")
   ) as $cwd
 
-# Extract elapsed seconds
+# Extract elapsed seconds: prefer result.duration_seconds; if absent, sum duration of all steps
 | (
-    ($result_event.result.duration_seconds // empty)
-    // ($last_step_done.step_update.duration_seconds // empty)
-    // 0.0
+    if $result_event.result.duration_seconds != null then
+      $result_event.result.duration_seconds
+    else
+      [
+        $valid_events[]
+        | (.duration_seconds // .step_update.duration_seconds // empty)
+      ] | add // 0.0
+    end
   ) as $elapsed_sec
 
 # Extract response text
@@ -52,11 +55,30 @@
     | join("\n")
   ) as $thinking_text
 
-# Extract usage
+# Extract usage:
+# If result.usage exists, use it.
+# Otherwise, accumulate across all step_updates (sum output/thinking, max input/cache)
 | (
-    ($result_event.result.usage // empty)
-    // ($last_step_done.step_update.usage // empty)
-    // {}
+    if $result_event.result.usage != null then
+      $result_event.result.usage
+    else
+      [ $valid_events[] | select(.step_update.usage != null) | .step_update.usage ] as $usages
+      | if ($usages | length) > 0 then
+          {
+            input_tokens: ($usages | map(.input_tokens // .prompt_tokens // 0) | max // 0),
+            output_tokens: ($usages | map(.output_tokens // .completion_tokens // 0) | add // 0),
+            thinking_tokens: ($usages | map(.thinking_tokens // .thought_tokens // 0) | add // 0),
+            cache_read_tokens: ($usages | map(.cache_read_tokens // 0) | max // 0),
+            cache_write_tokens: ($usages | map(.cache_write_tokens // 0) | max // 0),
+            total_tokens: (
+              ($usages | map(.input_tokens // .prompt_tokens // 0) | max // 0) +
+              ($usages | map(.output_tokens // .completion_tokens // 0) | add // 0)
+            )
+          }
+        else
+          {}
+        end
+    end
   ) as $usage
 
 | ($usage.input_tokens // $usage.prompt_tokens // 0) as $in_tokens
@@ -66,23 +88,54 @@
 | ($usage.cache_write_tokens // 0) as $cache_write_tokens
 | ($usage.total_tokens // ($in_tokens + $out_tokens)) as $tot_tokens
 
-# Tools / Commands extraction
+# Tools / Commands extraction:
+# Group by step_index to deduplicate and merge ACTIVE (start) and DONE (finish) events
 | [
     $valid_events[]
-    | (
-        .tool_calls // .step_update.tool_calls // []
-        | if type == "array" then .[] else . end
-      ),
-      (
-        .tool_info // .step_update.tool_info // empty
+    | select(
+        .step_update.step_type == "tool" or
+        .step_update.tool_info != null or
+        .tool_info != null or
+        .tool_calls != null
       )
-  ] as $raw_tools
+  ] as $raw_tool_events
+
+| (
+    if ($raw_tool_events | length) > 0 then
+      $raw_tool_events
+      | group_by(.step_update.step_index // .step_index // 0)
+      | map(
+          reduce .[] as $item (
+            {};
+            .step_index = ($item.step_update.step_index // $item.step_index // .step_index)
+            | .tool_name = ($item.step_update.tool_name // $item.tool_name // .tool_name)
+            | .duration_seconds = ($item.step_update.duration_seconds // $item.duration_seconds // .duration_seconds // 0.0)
+            | ($item.step_update.tool_info // $item.tool_info // {}) as $ti
+            | .name = ($ti.name // .name // .tool_name // "unknown")
+            | .args = ($ti.parameters // $ti.args // .args // {})
+            | if $ti.output != null then .output = $ti.output end
+          )
+        )
+    else
+      # Also check top-level tool_calls array if present (e.g. single JSON mode)
+      [
+        $valid_events[]
+        | (.tool_calls // .step_update.tool_calls // empty)
+        | if type == "array" then .[] else . end
+      ]
+      | map({
+          name: (.name // .tool_name // "unknown"),
+          args: (.args // .parameters // {}),
+          output: (.output // "")
+        })
+    end
+  ) as $deduped_tools
 
 | [
-    range(0; $raw_tools | length) as $i
-    | $raw_tools[$i] as $t
+    range(0; $deduped_tools | length) as $i
+    | $deduped_tools[$i] as $t
     | ($t.name // $t.tool_name // "unknown") as $t_name
-    | ($t.args // $t.parameters // {}) as $t_args
+    | ($t.args // {}) as $t_args
     | (
         if $t_name == "run_command" then
           ($t_args.CommandLine // $t_args.command // $t_args.cmd // "")
