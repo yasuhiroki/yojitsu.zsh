@@ -127,6 +127,13 @@ yojitsu::common::resolve_next_output_dir() {
 # --- Formatting Helpers ---
 yojitsu::common::format_number() {
   local num="$1"
-  # Format integers with commas (e.g. 1234567 -> 1,234,567)
-  LC_ALL=C printf "%'d" "${num}" 2>/dev/null || print -r -- "${num}"
+  print -r -- "${num}" | awk '{
+    len = length($0)
+    res = ""
+    for (i = 0; i < len; i++) {
+      if (i > 0 && i % 3 == 0) res = "," res
+      res = substr($0, len - i, 1) res
+    }
+    print res
+  }'
 }
