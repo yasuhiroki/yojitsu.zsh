@@ -67,12 +67,14 @@ yojitsu::report_html::generate() {
   local html_content
   html_content="$(<"${template_html_path}")"
 
-  # Replace title
-  html_content="${html_content//<h1 id=\"reportTitle\">yojitsu Benchmark Dashboard<\/h1>/<h1 id=\"reportTitle\">${report_title}<\/h1>}"
+  # Replace title and subtitle placeholders
+  html_content="${html_content//\{\{REPORT_TITLE\}\}/${report_title}}"
+
+  local subtitle_text="LLM Cost-Performance & Token Consumption Analyzer"
   if [[ -n "${target_desc}" ]]; then
-    local subtitle_text="Target: ${target_desc} | Generated: $(date '+%Y-%m-%d %H:%M:%S')"
-    html_content="${html_content//<div class=\"subtitle\" id=\"reportSubtitle\">LLM Cost-Performance & Token Consumption Analyzer<\/div>/<div class=\"subtitle\" id=\"reportSubtitle\">${subtitle_text}<\/div>}"
+    subtitle_text="Target: ${target_desc} | Generated: $(date '+%Y-%m-%d %H:%M:%S')"
   fi
+  html_content="${html_content//\{\{REPORT_SUBTITLE\}\}/${subtitle_text}}"
 
   # Inject JSON data into script tag using temporary file replacement to avoid sed escaping issues
   local marker="<script id=\"benchmark-data\" type=\"application/json\">"
