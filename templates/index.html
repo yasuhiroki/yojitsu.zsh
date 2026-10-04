@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>yojitsu - LLM Benchmark Report</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1 id="reportTitle">yojitsu Benchmark Dashboard</h1>
+      <div class="subtitle" id="reportSubtitle">LLM Cost-Performance & Token Consumption Analyzer</div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="switchView('all', this)">All Views</button>
+      <button class="tab-btn" onclick="switchView('overview', this)">Overview & Charts</button>
+      <button class="tab-btn" onclick="switchView('details', this)">Benchmark Details</button>
+    </div>
+
+    <!-- VIEW 1: Overview & Charts -->
+    <div id="view-overview">
+      <div class="card">
+        <h3>
+          <span>Token Breakdown (Stacked)</span>
+          <small style="color: #64748b; font-size: 12px;">Thinking vs Response vs Command Output vs Base Context</small>
+        </h3>
+        <div class="chart-container-lg">
+          <canvas id="tokenBreakdownChart"></canvas>
+        </div>
+      </div>
+
+      <div class="charts-grid">
+        <div class="card">
+          <h3>Top Command Output Context Consumers</h3>
+          <div class="chart-container-sm">
+            <canvas id="cmdTokenChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Execution Time (Seconds)</h3>
+          <div class="chart-container-sm">
+            <canvas id="timeChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW 2: Detailed Results Table -->
+    <div id="view-details">
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+          <div>
+            <h3 style="margin: 0; display: inline-block;">Detailed Execution Results</h3>
+            <span style="color: #64748b; font-size: 12px; margin-left: 12px;">Click a row to expand step-by-step tool commands, thinking process, and response</span>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="action-btn" onclick="toggleAllRows(true)">Expand All</button>
+            <button class="action-btn" onclick="toggleAllRows(false)">Collapse All</button>
+          </div>
+        </div>
+
+        <table class="benchmark-table">
+          <thead>
+            <tr>
+              <th style="width: 36px; text-align: center;"></th>
+              <th style="width: 24%;">Variant / Title</th>
+              <th style="width: 8%;">Effort</th>
+              <th style="width: 8%;">Time</th>
+              <th style="width: 10%;">Total</th>
+              <th style="width: 18%;">In (Cmd / Base)</th>
+              <th style="width: 18%;">Out (Think / Resp)</th>
+              <th style="width: 14%;">Commands</th>
+            </tr>
+          </thead>
+          <tbody id="benchmarkTableBody">
+            <!-- Dynamically populated by app.js -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Injected benchmark data JSON -->
+  <script id="benchmark-data" type="application/json">
+[]
+  </script>
+  <script src="app.js"></script>
+</body>
+</html>
