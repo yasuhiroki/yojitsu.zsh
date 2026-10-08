@@ -117,10 +117,11 @@ function renderCharts(results) {
     const runId = r.benchmark?.id || 'P';
     (r.tools || []).forEach(t => {
       const shortCmd = (t.command || '').substring(0, 40);
-      if (shortCmd && (t.consumed_tokens || 0) > 0) {
+      const stepTok = t.tokens?.input_tokens ?? t.consumed_tokens ?? 0;
+      if (shortCmd && stepTok > 0) {
         topCmds.push({
           label: `[${runId}] ${shortCmd}`,
-          tokens: t.consumed_tokens
+          tokens: stepTok
         });
       }
     });
@@ -208,15 +209,22 @@ function renderTable(results) {
 
     let cmdRows = '';
     if (tools.length > 0) {
-      cmdRows = tools.map((t, cIdx) => `
+      cmdRows = tools.map((t, cIdx) => {
+        const tTok = t.tokens || {};
+        const stepIn = tTok.input_tokens ?? t.input_tokens ?? t.consumed_tokens ?? 0;
+        const stepOut = tTok.output_tokens ?? t.output_tokens ?? 0;
+        const stepCache = tTok.cache_read_tokens ?? t.cache_read_tokens ?? 0;
+        return `
         <tr>
           <td><code>#${cIdx + 1}</code></td>
           <td><strong style="color: #38bdf8;">${escapeHtml(t.command || t.tool || '')}</strong></td>
-          <td>${(t.output_chars || 0).toLocaleString()} chars</td>
-          <td><strong style="color: #60a5fa;">~${(t.consumed_tokens || 0).toLocaleString()} tokens</strong></td>
+          <td><span style="color: #60a5fa; font-weight: 600;">${stepIn.toLocaleString()}</span></td>
+          <td><span style="color: #f472b6; font-weight: 600;">${stepOut.toLocaleString()}</span></td>
+          <td><span style="color: #c084fc; font-weight: 600;">${stepCache.toLocaleString()}</span></td>
           <td><pre>${escapeHtml(t.output_preview || '')}</pre></td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
     }
 
     const cmdTableHtml = tools.length > 0 ? `
@@ -224,10 +232,11 @@ function renderTable(results) {
         <thead>
           <tr>
             <th style="width: 48px;">Step</th>
-            <th style="width: 32%;">Command / Tool</th>
-            <th style="width: 14%;">Output Chars</th>
-            <th style="width: 16%;">Consumed Tokens</th>
-            <th style="width: 38%;">Preview</th>
+            <th style="width: 30%;">Command / Tool</th>
+            <th style="width: 12%;">In Tokens</th>
+            <th style="width: 10%;">Out Tokens</th>
+            <th style="width: 12%;">Cache Read</th>
+            <th style="width: 36%;">Preview</th>
           </tr>
         </thead>
         <tbody>${cmdRows}</tbody>

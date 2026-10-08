@@ -20,7 +20,7 @@ This document defines the core design principles, coding conventions, shared sch
 
 ---
 
-## 2. Common Data Schema (v1.1.0)
+## 2. Common Data Schema (v1.2.0)
 
 Every normalization filter (`lib/normalize/<agent>.jq`) must output a JSON object (or an array of objects) strictly conforming to the following structure:
 
@@ -28,7 +28,7 @@ Every normalization filter (`lib/normalize/<agent>.jq`) must output a JSON objec
 
 ```json
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "metadata": {
     "agent": "agy | claude | copilot | other",
     "timestamp": "ISO-8601 string (e.g. 2026-10-05T00:30:00Z)",
@@ -74,7 +74,11 @@ Every normalization filter (`lib/normalize/<agent>.jq`) must output a JSON objec
       "tool": "Tool name (e.g. run_command, view_file, grep)",
       "command": "Summary of command executed",
       "args": {},
-      "output_chars": 0,
+      "tokens": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0
+      },
       "consumed_tokens": 0,
       "output_preview": "First ~160 characters of tool stdout/output"
     }

@@ -17,7 +17,7 @@ if [[ -f "${SAMPLE_JSON}" ]]; then
   AGENT="$(print -r -- "${NORM_OUT}" | jq -r '.metadata.agent')"
   IN_TOK="$(print -r -- "${NORM_OUT}" | jq -r '.tokens.input.input_tokens // .tokens.input_tokens')"
 
-  if [[ "${VER}" != "1.1.0" || "${AGENT}" != "agy" || "${IN_TOK}" -le 0 ]]; then
+  if [[ "${VER}" != "1.2.0" || "${AGENT}" != "agy" || "${IN_TOK}" -le 0 ]]; then
     print "FAILED: unexpected normalization output"
     exit 1
   fi

@@ -131,7 +131,7 @@
     end
   ) as $deduped_tools
 
-# Extract response step usages for measuring real tool context delta
+# Extract response step usages for measuring real tool context delta and per-step in/out/cache
 | [
     $valid_events[]
     | select(
@@ -140,6 +140,9 @@
       )
     | {
         step_index: (.step_update.step_index // .step_index // 0),
+        in_tokens: (.step_update.usage.input_tokens // .usage.input_tokens // 0),
+        out_tokens: (.step_update.usage.output_tokens // .usage.output_tokens // 0),
+        cache_read_tokens: (.step_update.usage.cache_read_tokens // .usage.cache_read_tokens // 0),
         total_prompt: (
           (.step_update.usage.input_tokens // .usage.input_tokens // 0) +
           (.step_update.usage.cache_read_tokens // .usage.cache_read_tokens // 0)
@@ -188,12 +191,19 @@
           [1, (($t_chars / 2.5) | floor)] | max
         end
       ) as $t_tokens
+    | ($next_resp.in_tokens // 0) as $step_in
+    | ($next_resp.out_tokens // 0) as $step_out
+    | ($next_resp.cache_read_tokens // 0) as $step_cache
     | {
         step: ($i + 1),
         tool: $t_name,
         command: (if $cmd_str == "" then $t_name else $cmd_str end),
         args: $t_args,
-        output_chars: $t_chars,
+        tokens: {
+          input_tokens: (if $next_resp != null then $step_in else $t_tokens end),
+          output_tokens: $step_out,
+          cache_read_tokens: $step_cache
+        },
         consumed_tokens: $t_tokens,
         output_preview: (if ($t_out | type) == "string" and ($t_out | length) > 160 then ($t_out[0:160] + "...") elif ($t_out | type) == "string" then $t_out else (($t_out | tostring)[0:160]) end)
       }
@@ -255,9 +265,9 @@
     [0, ($final_in_tokens - $prompt_tokens - $cmd_tokens)] | max
   ) as $base_context_tokens
 
-# Build Common Schema v1.1.0 object
+# Build Common Schema v1.2.0 object
 | {
-    version: "1.1.0",
+    version: "1.2.0",
     metadata: {
       agent: "agy",
       timestamp: ($ARGS.named.timestamp // (now | todateiso8601)),
