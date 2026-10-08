@@ -20,7 +20,7 @@ This document defines the core design principles, coding conventions, shared sch
 
 ---
 
-## 2. Common Data Schema (v1.0.0)
+## 2. Common Data Schema (v1.1.0)
 
 Every normalization filter (`lib/normalize/<agent>.jq`) must output a JSON object (or an array of objects) strictly conforming to the following structure:
 
@@ -28,7 +28,7 @@ Every normalization filter (`lib/normalize/<agent>.jq`) must output a JSON objec
 
 ```json
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "metadata": {
     "agent": "agy | claude | copilot | other",
     "timestamp": "ISO-8601 string (e.g. 2026-10-05T00:30:00Z)",
@@ -45,18 +45,23 @@ Every normalization filter (`lib/normalize/<agent>.jq`) must output a JSON objec
     "exit_code": 0
   },
   "tokens": {
-    "input_tokens": 0,
-    "output_tokens": 0,
     "total_tokens": 0,
-    "cache_read_tokens": 0,
-    "cache_write_tokens": 0,
-    "breakdown": {
-      "prompt_tokens": 0,
-      "cmd_tokens": 0,
-      "base_context_tokens": 0,
+    "input": {
+      "input_tokens": 0,
       "cache_read_tokens": 0,
-      "thought_tokens": 0,
-      "response_tokens": 0
+      "cache_write_tokens": 0,
+      "breakdown": {
+        "prompt_tokens": 0,
+        "cmd_tokens": 0,
+        "base_context_tokens": 0
+      }
+    },
+    "output": {
+      "output_tokens": 0,
+      "breakdown": {
+        "thought_tokens": 0,
+        "response_tokens": 0
+      }
     }
   },
   "cost": {
@@ -80,15 +85,28 @@ Every normalization filter (`lib/normalize/<agent>.jq`) must output a JSON objec
 }
 ```
 
-### Estimation & Fallback Rules
-When raw logs lack specific token fields, use the following fallback calculations:
-- **Missing Token Count**: Estimate based on character length divided by 2.5:
-  `max(1, (length / 2.5) | floor)`.
-- **`thought_tokens` and `response_tokens`**:
-  - If reasoning tokens are explicitly reported in usage metadata, use that value.
-  - Otherwise, estimate `thought_tokens` from `thinking` text length. Set `response_tokens = max(0, output_tokens - thought_tokens)`.
-- **`base_context_tokens`**:
-  - Calculated as: `max(0, input_tokens - prompt_tokens - cache_read_tokens - cmd_tokens)`.
+### Token Accounting & Equivalence Rules
+
+1. **Total Tokens**:
+   - `total_tokens = input.input_tokens + output.output_tokens`
+   - Represents the sum of processed input and generated output tokens.
+
+2. **Output Accounting**:
+   - `output.output_tokens = output.breakdown.thought_tokens + output.breakdown.response_tokens`
+   - `thought_tokens`: Explicitly reported reasoning/thinking tokens, or estimated from thinking text length.
+   - `response_tokens`: Final answer tokens (`output_tokens - thought_tokens`).
+
+3. **Input Accounting**:
+   - `input.input_tokens = input.breakdown.prompt_tokens + input.breakdown.cmd_tokens + input.breakdown.base_context_tokens`
+   - `cache_read_tokens`: Context tokens served from prompt cache (reported separately).
+   - `prompt_tokens`: Tokens from the user-submitted prompt text.
+   - `cmd_tokens`: Total tokens consumed by tool executions (command outputs, viewed files).
+   - `base_context_tokens`: Static baseline context (system prompts, tool definitions, git/env info):
+     `max(0, input.input_tokens - prompt_tokens - cmd_tokens)`.
+
+4. **Estimation & Fallback Rules**:
+   - **Missing Token Count**: Estimate based on character length divided by 2.5: `max(1, (length / 2.5) | floor)`.
+   - **Tool Output Size**: For file view operations returning metadata like `"<N> lines, <M> bytes"`, the actual byte count `<M>` MUST be used as the output size for consumed token calculations rather than the length of the summary string.
 
 ---
 
