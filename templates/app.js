@@ -44,11 +44,11 @@ function renderCharts(results) {
     return parts[0];
   });
 
-  const thoughtTokens = results.map(r => r.tokens?.breakdown?.thought_tokens || 0);
-  const responseTokens = results.map(r => r.tokens?.breakdown?.response_tokens || 0);
-  const cmdTokens = results.map(r => r.tokens?.breakdown?.cmd_tokens || 0);
-  const baseCtxTokens = results.map(r => r.tokens?.breakdown?.base_context_tokens || 0);
-  const promptTokens = results.map(r => r.tokens?.breakdown?.prompt_tokens || 0);
+  const thoughtTokens = results.map(r => r.tokens?.output?.breakdown?.thought_tokens ?? r.tokens?.breakdown?.thought_tokens ?? 0);
+  const responseTokens = results.map(r => r.tokens?.output?.breakdown?.response_tokens ?? r.tokens?.breakdown?.response_tokens ?? 0);
+  const cmdTokens = results.map(r => r.tokens?.input?.breakdown?.cmd_tokens ?? r.tokens?.breakdown?.cmd_tokens ?? 0);
+  const baseCtxTokens = results.map(r => r.tokens?.input?.breakdown?.base_context_tokens ?? r.tokens?.breakdown?.base_context_tokens ?? 0);
+  const promptTokens = results.map(r => r.tokens?.input?.breakdown?.prompt_tokens ?? r.tokens?.breakdown?.prompt_tokens ?? 0);
   const times = results.map(r => r.benchmark?.elapsed_sec || 0);
 
   // 1. Stacked Token Breakdown Chart
@@ -191,14 +191,20 @@ function renderTable(results) {
     const rowId = `row_${idx}`;
     const bm = r.benchmark || {};
     const tokens = r.tokens || {};
-    const bk = tokens.breakdown || {};
+    const inTokens = tokens.input || {};
+    const inBk = inTokens.breakdown || tokens.breakdown || {};
+    const outTokens = tokens.output || {};
+    const outBk = outTokens.breakdown || tokens.breakdown || {};
     const tools = r.tools || [];
     const meta = r.metadata || {};
 
-    const cmdTok = bk.cmd_tokens || 0;
-    const baseTok = bk.base_context_tokens || 0;
-    const thTok = bk.thought_tokens || 0;
-    const respTok = bk.response_tokens || 0;
+    const cmdTok = inBk.cmd_tokens || 0;
+    const baseTok = inBk.base_context_tokens || 0;
+    const thTok = outBk.thought_tokens || 0;
+    const respTok = outBk.response_tokens || 0;
+    const totalIn = inTokens.input_tokens ?? tokens.input_tokens ?? 0;
+    const totalOut = outTokens.output_tokens ?? tokens.output_tokens ?? 0;
+    const cacheTok = inTokens.cache_read_tokens ?? tokens.cache_read_tokens ?? 0;
 
     let cmdRows = '';
     if (tools.length > 0) {
@@ -247,11 +253,11 @@ function renderTable(results) {
       <td>${bm.elapsed_sec || 0} s</td>
       <td><strong style="color: #38bdf8; font-size: 14px;">${(tokens.total_tokens || 0).toLocaleString()}</strong></td>
       <td>
-        ${(tokens.input_tokens || 0).toLocaleString()}<br>
+        ${totalIn.toLocaleString()}${cacheTok > 0 ? ` <small style="color: #a78bfa;">(cache:${cacheTok.toLocaleString()})</small>` : ''}<br>
         <small style="color: #60a5fa;">Cmd:${cmdTok.toLocaleString()}</small> <small style="color: #64748b;">Base:${baseTok.toLocaleString()}</small>
       </td>
       <td>
-        ${(tokens.output_tokens || 0).toLocaleString()}<br>
+        ${totalOut.toLocaleString()}<br>
         <small style="color: #c084fc;">Think:${thTok.toLocaleString()}</small> <small style="color: #f472b6;">Resp:${respTok.toLocaleString()}</small>
       </td>
       <td><span class="pill pill-tool">${tools.length} cmds</span></td>
@@ -263,6 +269,7 @@ function renderTable(results) {
     trDetail.innerHTML = `
       <td colspan="8" class="detail-container">
         <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
+          ${cacheTok > 0 ? `<span class="pill" style="background: rgba(167, 139, 250, 0.15); color: #c084fc; border: 1px solid rgba(167, 139, 250, 0.3);">Cache Read: ${cacheTok.toLocaleString()} tokens</span>` : ''}
           <span class="pill pill-cmd">Command Output: ~${cmdTok.toLocaleString()} tokens</span>
           <span class="pill pill-thought">Thinking: ${thTok.toLocaleString()} tokens</span>
           <span class="pill pill-resp">Response: ${respTok.toLocaleString()} tokens</span>

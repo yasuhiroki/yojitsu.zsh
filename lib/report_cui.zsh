@@ -42,10 +42,10 @@ yojitsu::report_cui::render_table() {
           ((if (.benchmark.effort // "") != "" then .benchmark.effort else "default" end) | tostring),
           ((.benchmark.elapsed_sec // 0.0) | tostring),
           ((.tokens.total_tokens // 0) | tostring),
-          ((.tokens.breakdown.cmd_tokens // 0) | tostring),
-          ((.tokens.breakdown.base_context_tokens // 0) | tostring),
-          ((.tokens.breakdown.thought_tokens // 0) | tostring),
-          ((.tokens.breakdown.response_tokens // 0) | tostring),
+          ((.tokens.input.breakdown.cmd_tokens // .tokens.breakdown.cmd_tokens // 0) | tostring),
+          ((.tokens.input.breakdown.base_context_tokens // .tokens.breakdown.base_context_tokens // 0) | tostring),
+          ((.tokens.output.breakdown.thought_tokens // .tokens.breakdown.thought_tokens // 0) | tostring),
+          ((.tokens.output.breakdown.response_tokens // .tokens.breakdown.response_tokens // 0) | tostring),
           ((.tool_calls_count // (.tools | length) // 0) | tostring),
           ((.cost.estimated_cost_usd // 0.0) | tostring)
         ]

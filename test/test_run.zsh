@@ -15,9 +15,9 @@ if [[ -f "${SAMPLE_JSON}" ]]; then
   NORM_OUT="$(jq -n -f "${REPO_ROOT}/lib/normalize/agy.jq" --arg prompt "test prompt" "${SAMPLE_JSON}")"
   VER="$(print -r -- "${NORM_OUT}" | jq -r '.version')"
   AGENT="$(print -r -- "${NORM_OUT}" | jq -r '.metadata.agent')"
-  IN_TOK="$(print -r -- "${NORM_OUT}" | jq -r '.tokens.input_tokens')"
+  IN_TOK="$(print -r -- "${NORM_OUT}" | jq -r '.tokens.input.input_tokens // .tokens.input_tokens')"
 
-  if [[ "${VER}" != "1.0.0" || "${AGENT}" != "agy" || "${IN_TOK}" -le 0 ]]; then
+  if [[ "${VER}" != "1.1.0" || "${AGENT}" != "agy" || "${IN_TOK}" -le 0 ]]; then
     print "FAILED: unexpected normalization output"
     exit 1
   fi

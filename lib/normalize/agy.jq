@@ -1,8 +1,8 @@
 # lib/normalize/agy.jq
 # Normalizes Google Antigravity (agy) stream-json or single-json into Common Benchmark Schema v1.0.0
 
-# Ingest all input events into an array
-[inputs] as $events
+# Ingest all input events into an array (supports stream NDJSON, single object, or array)
+(if type == "array" then . elif . == null then [inputs] else [., inputs] end) as $events
 | ($events | map(select(. != null))) as $valid_events
 
 # Extract init event and result event
@@ -150,7 +150,15 @@
         end
       ) as $cmd_str
     | ($t.output // "") as $t_out
-    | ($t_out | length) as $t_chars
+    | (
+        if (type == "string" or ($t_out | type == "string")) and ($t_out | test("[0-9]+ lines, ([0-9]+) bytes")) then
+          ($t_out | capture("[0-9]+ lines, (?<bytes>[0-9]+) bytes").bytes | tonumber)
+        elif ($t_out | type) == "string" then
+          ($t_out | length)
+        else
+          (($t_out | tostring) | length)
+        end
+      ) as $t_chars
     | (if $t_chars == 0 then 0 else [1, (($t_chars / 2.5) | floor)] | max end) as $t_tokens
     | {
         step: ($i + 1),
@@ -159,7 +167,7 @@
         args: $t_args,
         output_chars: $t_chars,
         consumed_tokens: $t_tokens,
-        output_preview: (if $t_chars > 160 then ($t_out[0:160] + "...") else $t_out end)
+        output_preview: (if ($t_out | type) == "string" and ($t_out | length) > 160 then ($t_out[0:160] + "...") elif ($t_out | type) == "string" then $t_out else (($t_out | tostring)[0:160]) end)
       }
   ] as $tools
 
@@ -216,12 +224,12 @@
   ) as $final_total_tokens
 
 | (
-    [0, ($final_in_tokens - $prompt_tokens - $cache_read_tokens - $cmd_tokens)] | max
+    [0, ($final_in_tokens - $prompt_tokens - $cmd_tokens)] | max
   ) as $base_context_tokens
 
-# Build Common Schema v1.0.0 object
+# Build Common Schema v1.1.0 object
 | {
-    version: "1.0.0",
+    version: "1.1.0",
     metadata: {
       agent: "agy",
       timestamp: ($ARGS.named.timestamp // (now | todateiso8601)),
@@ -238,18 +246,23 @@
       exit_code: 0
     },
     tokens: {
-      input_tokens: $final_in_tokens,
-      output_tokens: $final_out_tokens,
       total_tokens: $final_total_tokens,
-      cache_read_tokens: $cache_read_tokens,
-      cache_write_tokens: $cache_write_tokens,
-      breakdown: {
-        prompt_tokens: $prompt_tokens,
-        cmd_tokens: $cmd_tokens,
-        base_context_tokens: $base_context_tokens,
+      input: {
+        input_tokens: $final_in_tokens,
         cache_read_tokens: $cache_read_tokens,
-        thought_tokens: $final_thought_tokens,
-        response_tokens: $final_resp_tokens
+        cache_write_tokens: $cache_write_tokens,
+        breakdown: {
+          prompt_tokens: $prompt_tokens,
+          cmd_tokens: $cmd_tokens,
+          base_context_tokens: $base_context_tokens
+        }
+      },
+      output: {
+        output_tokens: $final_out_tokens,
+        breakdown: {
+          thought_tokens: $final_thought_tokens,
+          response_tokens: $final_resp_tokens
+        }
       }
     },
     cost: {
