@@ -105,8 +105,9 @@ Every normalization filter (`lib/normalize/<agent>.jq`) must output a JSON objec
      `max(0, input.input_tokens - prompt_tokens - cmd_tokens)`.
 
 4. **Estimation & Fallback Rules**:
-   - **Missing Token Count**: Estimate based on character length divided by 2.5: `max(1, (length / 2.5) | floor)`.
-   - **Tool Output Size**: For file view operations returning metadata like `"<N> lines, <M> bytes"`, the actual byte count `<M>` MUST be used as the output size for consumed token calculations rather than the length of the summary string.
+   - **Per-Step Prompt Context Delta**: In stream logs providing per-step usage (e.g. `agy`), the tokens consumed by a tool step $S_i$ are measured by the prompt context delta $\Delta\text{ctx} = (S_{i+1}.\text{input\_tokens} + S_{i+1}.\text{cache\_read\_tokens}) - (S_{i-1}.\text{input\_tokens} + S_{i-1}.\text{cache\_read\_tokens})$ from the immediately following `agent_response`. When multiple tools execute within the same turn, the delta is distributed across those tools.
+   - **Missing Token Count / Fallback**: When per-step usage is unavailable, estimate consumed tokens based on character length divided by 2.5: `max(1, (length / 2.5) | floor)`.
+   - **Tool Output Size**: For file view operations returning metadata like `"<N> lines, <M> bytes"`, the actual byte count `<M>` MUST be used as the output size (`output_chars`).
 
 ---
 

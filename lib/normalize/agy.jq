@@ -131,11 +131,30 @@
     end
   ) as $deduped_tools
 
+# Extract response step usages for measuring real tool context delta
+| [
+    $valid_events[]
+    | select(
+        (.step_update.step_type == "agent_response" or .step_type == "agent_response") and
+        ((.step_update.usage != null) or (.usage != null))
+      )
+    | {
+        step_index: (.step_update.step_index // .step_index // 0),
+        total_prompt: (
+          (.step_update.usage.input_tokens // .usage.input_tokens // 0) +
+          (.step_update.usage.cache_read_tokens // .usage.cache_read_tokens // 0)
+        )
+      }
+  ] as $resp_steps
+
 | [
     range(0; $deduped_tools | length) as $i
     | $deduped_tools[$i] as $t
     | ($t.name // $t.tool_name // "unknown") as $t_name
     | ($t.args // {}) as $t_args
+    | ($t.step_index // 0) as $t_step
+    | ($resp_steps | map(select(.step_index < $t_step)) | last) as $prev_resp
+    | ($resp_steps | map(select(.step_index > $t_step)) | first) as $next_resp
     | (
         if $t_name == "run_command" then
           ($t_args.CommandLine // $t_args.command // $t_args.cmd // "")
@@ -159,7 +178,16 @@
           (($t_out | tostring) | length)
         end
       ) as $t_chars
-    | (if $t_chars == 0 then 0 else [1, (($t_chars / 2.5) | floor)] | max end) as $t_tokens
+    | (
+        if $prev_resp != null and $next_resp != null and ($next_resp.total_prompt > $prev_resp.total_prompt) then
+          ($deduped_tools | map(select((.step_index // 0) > $prev_resp.step_index and (.step_index // 0) < $next_resp.step_index)) | length) as $tools_in_turn
+          | ((($next_resp.total_prompt - $prev_resp.total_prompt) / (if $tools_in_turn > 0 then $tools_in_turn else 1 end)) | floor)
+        elif $t_chars == 0 then
+          0
+        else
+          [1, (($t_chars / 2.5) | floor)] | max
+        end
+      ) as $t_tokens
     | {
         step: ($i + 1),
         tool: $t_name,
